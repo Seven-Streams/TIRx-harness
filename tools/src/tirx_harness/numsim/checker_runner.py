@@ -729,6 +729,64 @@ def _frontend_incomplete_payload(
         }
     elif source_anchor is not None and _native_diagnostic_has_source_line(source_anchor):
         details["source_anchor"] = copy.deepcopy(source_anchor)
+    return _pre_execution_incomplete_payload(
+        checker, details, termination="native_frontend_unsupported", source_anchor=source_anchor
+    )
+
+
+def extension_residue(func: Any) -> list:
+    """IR-extension constructs left in ``func`` (a Function or a sequence of them)."""
+
+    from ..extension import residue
+
+    found = []
+    for item in func if isinstance(func, list | tuple) else (func,):
+        found.extend(residue(item))
+    return found
+
+
+def _extension_residue_incomplete_payload(
+    checker: NativeChecker,
+    residues: list,
+    *,
+    source_anchor: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Fail closed on a kernel that still carries IR-extension constructs.
+
+    The native frontend would report these as unregistered calls, which reads
+    like a tool gap. They are the author's own operators, regions and types
+    that the extension's lowering pass has not run on yet.
+    """
+
+    listing = ", ".join(str(item) for item in residues)
+    details: dict[str, Any] = {
+        "kind": "extension_residue",
+        "reason": "extension_residue",
+        "message": (f"{len(residues)} IR-extension construct(s) remain in the kernel: {listing}"),
+        "constructs": [
+            {"kind": item.kind, "name": item.name, "loc": item.loc} for item in residues
+        ],
+        "hint": (
+            "lower the kernel with tirx_harness.extension.lower(kernel, *passes) and check "
+            "the result's .func; an unlowered kernel is not a checker defect"
+        ),
+    }
+    if source_anchor is not None and _native_diagnostic_has_source_line(source_anchor):
+        details["source_anchor"] = copy.deepcopy(source_anchor)
+    return _pre_execution_incomplete_payload(
+        checker, details, termination="extension_residue", source_anchor=source_anchor
+    )
+
+
+def _pre_execution_incomplete_payload(
+    checker: NativeChecker,
+    details: dict[str, Any],
+    *,
+    termination: str,
+    source_anchor: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """A typed ``incomplete`` result for a kernel the checker could not start on."""
+
     payload: dict[str, Any] = {
         "schema_version": 3,
         "verdict": "incomplete",
@@ -740,7 +798,7 @@ def _frontend_incomplete_payload(
         "coverage": {
             "status": "not_started",
             "eligible_for_clean": False,
-            "termination": {"kind": "native_frontend_unsupported"},
+            "termination": {"kind": termination},
         },
         "engine": {
             "mode": "native",
@@ -806,6 +864,15 @@ def run_native_checker(
 
     from .api import Engine
 
+    residues = extension_residue(func)
+    if residues:
+        return NativeCheckerRun(
+            module=None,
+            bindings=None,
+            payload=_extension_residue_incomplete_payload(
+                checker, residues, source_anchor=_primfunc_source_anchor(func)
+            ),
+        )
     try:
         shaped_func, shaped_inputs, shape_scalar_dtypes = _concretize_checker_shapes(func, inputs)
         concrete_func, execution_inputs, launch_scalar_dtypes = _concretize_checker_launch(

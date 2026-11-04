@@ -22,14 +22,18 @@ Plain TIRx-lite remains valid.
 - Author kernels with `@txl.kernel` as usual, calling your builders in the
   body. Write the lowering as passes (`Function -> Function`, for example with
   `tvm_ffi.structural_map`) and emit replacement statements with
-  `extension.emit()` and the TIRx-lite builders.
+  `extension.emit()` and the TIRx-lite builders. The pass is also where
+  schedule-level rewrites live: fusing adjacent constructs, choosing a lowering
+  per shape, moving a block; not only macro expansion.
 - Lower before anything else consumes a kernel:
-  `lowered = tirx_harness.extension.lower(kernel, *passes)`. Only the lowered
-  `txl.Kernel` goes to synccheck/racecheck/NumSim (`lowered.func`), to
-  `.compile()`, and into the callable the benchmark times. `lower` rejects any
-  remaining extension construct and re-runs the TIRx-lite low-level IR
-  contract on the result; an unlowered kernel is neither checkable nor
-  compilable.
+  `lowered = tirx_harness.extension.lower(kernel, *passes)`, or bind the passes
+  once with `kernel = extension.attach(kernel, *passes)` so that one object
+  serves everything. Only the lowered `txl.Kernel` goes to
+  synccheck/racecheck/NumSim (`.func`), to `.compile()`, and into the callable
+  the benchmark times. Both reject any remaining extension construct and
+  re-run the TIRx-lite low-level IR contract on the result; an unlowered
+  kernel is neither checkable nor compilable (the checkers report it as an
+  `extension_residue` finding, not a tool defect).
 - `check_ir=True` stays on. The lowered kernel still originates from
   `@txl.kernel` and is bound by the same implementation contract.
 - Record in `frontier/index.json` which abstractions a member defines and how

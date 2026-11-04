@@ -19,14 +19,19 @@ the abstraction. Use it when that pays off; plain TIRx-lite remains valid.
 
 1. **Define** the namespace, its operators/types, and their result types.
 2. **Author** kernels with `@txl.kernel`, calling the published builders.
-3. **Lower**: `lowered = extension.lower(kernel, *passes)`. The passes rewrite
-   `Function -> Function`; `lower` rejects any remaining extension construct
-   (`ExtensionResidueError`) and re-runs the TIRx-lite low-level IR contract.
+3. **Lower**: `lowered = extension.lower(kernel, *passes)`, or bind the passes
+   once with `kernel = extension.attach(kernel, *passes)` so that one object's
+   `.func` and `.compile()` are the lowered kernel (lowered on first use; the
+   kernel as written stays in `.traced_func`). The passes rewrite
+   `Function -> Function`; both entry points reject any remaining extension
+   construct (`ExtensionResidueError`) and re-run the TIRx-lite low-level IR
+   contract.
 4. **Consume only the lowered kernel**: `synccheck(lowered.func, inputs)`,
    `racecheck(lowered.func, inputs)`, NumSim on `lowered.func`,
    `lowered.compile()`, and the compiled callable in `setup()`. An unlowered
-   kernel fails in codegen (`Unsupported region op ...`) and makes the checkers
-   report `incomplete` (`unregistered raw call`).
+   kernel fails in codegen (`Unsupported region op ...`), makes the checkers
+   report `incomplete` with an `extension_residue` finding that names the
+   constructs, and makes NumSim raise `ExtensionResidueError`.
 
 ## API (`from tirx_harness import extension`)
 
@@ -40,6 +45,7 @@ the abstraction. Use it when that pays off; plain TIRx-lite remains valid.
 | `extension.VOID` | The void result type (`T.void`). `ir.NoneType()` is **not** void: a call of that type is silently dropped at trace time. |
 | `extension.emit(kernel=None, *, loc=None)` | Context manager for lowering: runs TIRx-lite builders (`txl.ptx.*`, `txl.cuda.*`, `txl.local_scalar`, `txl.serial`, `txl.if_`, ...) into a fresh builder; `block.stmt` holds the statements after the block. `txl.lane_id()` and friends resolve against the kernel being lowered. Pass `loc=stmt.loc` so diagnostics on the emitted code point at the kernel line. |
 | `extension.lower(kernel, *passes, allowed_func_calls=())` | Apply the passes (callables `Function -> Function`, or `tvm_tirx` passes) and verify. Returns a `txl.Kernel` sharing the launch metadata (or a `Function` for a bare function). |
+| `extension.attach(kernel, *passes, allowed_func_calls=())` | Bind the passes to the kernel: a `txl.Kernel` whose `func`, `mod`, `compile()` and `source()` are the lowered, verified kernel, computed once on first use; `traced_func` is the kernel as written. One object for checkers, compiler and benchmark. |
 | `extension.verify_lowered(kernel_or_func)` | The verification alone: residue check, then the low-level IR contract. |
 | `extension.residue(kernel_or_func)` | List the extension calls, regions and types with `file:line` where known. |
 
@@ -150,6 +156,69 @@ ExtensionResidueError: 7 extension construct(s) remain in kernel 'k':
   - call kda_ext.st_scaled at solution.py:40
 Lower them with the extension's pass (tirx_harness.extension.lower) before synccheck, ...
 ```
+
+## Pass-level lowering
+
+A pass sees the whole function, so it can do more than expand each construct
+in place. Two shapes that pay off, both exercised by the harness tests:
+
+**Choose the lowering per shape.** A region operator with a constant, short
+trip count unrolls; anything else becomes a loop. The body parameter is
+substituted with `structural_map` over `ir.Var`:
+
+```python
+def substitute(body, var, value):
+    return tvm_ffi.structural_map(body, [(ir.Var, lambda v: value if v.same_as(var) else v)])
+
+def regions(stmt):                      # callback for (ir.RegionStmt, regions)
+    if not stmt.op.same_as(TOKEN_LOOP):
+        return stmt
+    (i,) = stmt.body_params
+    n = stmt.args[0]
+    if isinstance(n, ir.IntImm) and n.value <= 8:
+        return ir.SeqStmt([substitute(stmt.body, i, ir.IntImm("int32", t)) for t in range(n.value)],
+                          loc=stmt.loc)
+    zero, one = ir.IntImm("int32", 0), ir.IntImm("int32", 1)
+    return ir.For(i, zero, n, one, ir.ForKind.DEFAULT, stmt.body, loc=stmt.loc)
+```
+
+**Fuse a run of statements.** A `SeqStmt` callback walks the statement list,
+collects consecutive `pair_sum(dst, val, delta)` calls on one destination and
+emits them as one butterfly sharing a single `peer` register, instead of one
+shuffle block with its own temporary per call:
+
+```python
+def fuse(seq):                          # callback for (ir.SeqStmt, fuse)
+    out, run = [], []
+
+    def flush():
+        if not run:
+            return
+        dst = run[0].value.args[0]
+        with extension.emit(loc=run[0].loc) as block:
+            peer = txl.local_scalar("uint32")
+            for call in run:
+                _, val, delta = call.value.args
+                txl.ptx.shfl_sync.bfly.b32(peer, txl.reinterpret(val, ty="uint32"),
+                                           txl.cast(delta, "uint32"), txl.uint32(31),
+                                           txl.uint32(0xFFFFFFFF))
+                txl.assign(dst, dst + txl.reinterpret(peer, ty="float32"))
+        out.append(block.stmt)
+        run.clear()
+
+    for stmt in seq.seq:
+        if is_pair_sum(stmt) and (not run or run[0].value.args[0].same_as(stmt.value.args[0])):
+            run.append(stmt)
+        else:
+            flush()
+            out.append(stmt)
+    flush()
+    return ir.SeqStmt(out, loc=seq.loc)
+```
+
+The same machinery hoists or reorders statements (a group of loads moved to
+the top of a loop body); run racecheck on the result, which is what caught a
+real race in such a rewrite during the first KDA run with extensions.
 
 ## Rules of the road
 

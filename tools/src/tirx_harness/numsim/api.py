@@ -985,6 +985,14 @@ def transpile(
 
     if _analysis_checker not in {None, "synccheck", "racecheck"}:
         raise ValueError(f"unknown native analysis checker: {_analysis_checker!r}")
+    from ..extension import ExtensionResidueError
+    from .checker_runner import extension_residue
+
+    residues = extension_residue(func)
+    if residues:
+        # The author's own IR-extension constructs, not a NumSim gap: say so
+        # before the frontend reports them as unregistered calls.
+        raise ExtensionResidueError(residues, subject="the kernel given to NumSim")
     analysis_capable = _analysis_capable or _analysis_checker is not None
     frozen_source = normalize_transpile_source(
         tuple(func) if isinstance(func, (list, tuple)) else func

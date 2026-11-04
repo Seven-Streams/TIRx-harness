@@ -84,6 +84,7 @@ accesses.
 | out-of-bounds access | An executed lane accesses bytes outside its view or backing allocation. |
 | synchronization error | The execution violates a barrier or synchronization protocol. |
 | `incomplete` | Missing evidence or an unsupported executed effect prevented certification. |
+| `extension_residue` (incomplete) | The kernel still carries IR-extension constructs, listed with their source lines. Lower it with `tirx_harness.extension.lower` and check the result; this is not a checker defect. |
 | `review` | A non-fatal advisory needs an explicit disposition. |
 
 `report.print()` includes the responsible operation, source text, CTA/warp/lane

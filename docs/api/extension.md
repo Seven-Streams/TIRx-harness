@@ -19,6 +19,10 @@ FMA3 = ns.op("fma3", "a * b + c.", ["a", "b", "c"], infer_type=lambda c: c.args[
 lowered = extension.lower(kernel, my_lowering_pass)   # a txl.Kernel with core IR only
 synccheck(lowered.func, inputs)
 executable = lowered.compile()
+
+kernel = extension.attach(kernel, my_lowering_pass)   # or: one object, lowered on first use
+synccheck(kernel.func, inputs)
+executable = kernel.compile()
 ```
 
 The tirx-wiki skill page `references/tirx-ir-extension.md` walks through a
@@ -41,6 +45,10 @@ pass and the checks.
 
 ```{eval-rst}
 .. autoapifunction:: tirx_harness.extension.lower
+```
+
+```{eval-rst}
+.. autoapifunction:: tirx_harness.extension.attach
 ```
 
 ```{eval-rst}

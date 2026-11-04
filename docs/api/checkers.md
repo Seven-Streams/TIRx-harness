@@ -14,7 +14,9 @@ output buffers. Buffer bindings are CPU NumPy arrays (bf16 buffers as
 parameterless kernels may omit the bindings. Tensor-map parameters use
 {py:meth}`tirx_harness.numsim.TensorMap.numpy`. A kernel that uses
 [IR extensions](extension.md) is checked after its lowering, through the
-`.func` of the `lower` result.
+`.func` of the `lower` (or `attach`) result. An unlowered kernel returns
+`incomplete` with one `extension_residue` finding that lists the constructs and
+their source lines.
 
 ```{eval-rst}
 .. autoapifunction:: tirx_harness.synccheck

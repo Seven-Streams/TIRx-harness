@@ -49,8 +49,9 @@ result.outputs["y"], result.diagnostics, result.verdict
   kernel on the shape it is launched with; Synccheck and Racecheck accept the
   dynamic form.
 - A kernel that uses IR extensions is simulated after its own lowering: pass
-  the `.func` of the `tirx_harness.extension.lower(...)` result. The
-  unlowered kernel fails with `unregistered raw call`.
+  the `.func` of the `tirx_harness.extension.lower(...)` result (or of the
+  `extension.attach(...)` kernel). An unlowered kernel raises
+  `ExtensionResidueError` naming the constructs.
 - Start with the smallest representative shape; build and simulation cost
   grow with the simulated work. The first transpile in a fresh cache also
   builds the native engine (tens of seconds); later kernels reuse it.

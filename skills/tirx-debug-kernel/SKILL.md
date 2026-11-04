@@ -71,7 +71,9 @@ and write a report under the current repository's `bugs/`. State what failed,
 expected versus actual behavior, where it surfaced, and the exact reproduction
 command and output. Also include and run a reliable self-contained reproducer.
 Any `incomplete` verdict from NumSim, Synccheck, or Racecheck is unexpected and
-must also be filed as a tool bug. Keep supporting artifacts beside the report;
+must also be filed as a tool bug, except an `extension_residue` finding: the
+kernel still carries IR-extension constructs, so lower it with
+`tirx_harness.extension.lower` and check the result instead. Keep supporting artifacts beside the report;
 delete the report when fixed.
 
 ## Finish

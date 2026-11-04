@@ -307,3 +307,143 @@ def test_lowered_kernel_compiles_and_runs_on_the_gpu():
     executable(x, y)
     torch.cuda.synchronize()
     np.testing.assert_allclose(y.cpu().numpy(), ext.expected(x.cpu().numpy()))
+
+
+def test_attach_lowers_on_first_use_and_keeps_the_traced_function():
+    ext = _Complex()
+    k = ext.kernel()
+    runs = []
+
+    def counting(func):
+        runs.append(1)
+        return ext.lowering(func)
+
+    attached = extension.attach(k, counting)
+    assert isinstance(attached, txl.Kernel)
+    assert runs == [] and "not lowered yet" in repr(attached)
+    assert extension.residue(attached.traced_func)  # the kernel as written is kept
+    func = attached.func
+    assert runs == [1] and extension.residue(func) == []
+    assert attached.func is func and attached.mod["main"].same_as(func)
+    assert runs == [1]  # lowered once
+    assert (attached.name, attached.warps, attached.session) == (k.name, k.warps, k.session)
+    report = synccheck(
+        attached.func, {"x": np.ones(32, dtype=np.float32), "y": np.zeros(32, dtype=np.float32)}
+    )
+    assert report.verdict == "clean", report.to_dict()
+    with pytest.raises(TypeError, match="expects a txl.Kernel"):
+        extension.attach(k.func, counting)
+
+
+def test_attach_reports_residue_and_contract_violations_on_first_use():
+    ext = _Complex()
+    attached = extension.attach(ext.kernel(), lambda func: func)
+    with pytest.raises(extension.ExtensionResidueError):
+        attached.func
+
+
+class _PassLevel:
+    """Two lowerings that are more than macro expansion: shape-dependent and fusing."""
+
+    def __init__(self):
+        ns = self.ns = _fresh_namespace()
+        self.pair_sum = ns.op(
+            "pair_sum", "dst += shfl_xor(val, delta).", ["dst", "val", "delta"], ret_type="void"
+        )
+        self.token_loop = ns.region_op(
+            "token_loop", "Loop over tokens.", ["n"], body_params=[("i", "int32")]
+        )
+
+    def kernel(self, trip):
+        ns = self.ns
+
+        @txl.kernel()
+        def k(x: txl.Tensor((txl.int64(),), "float32"), y: txl.Tensor((txl.int64(),), "float32")):
+            txl.device_entry(launch=txl.cuda.LaunchConfig(grid=1, block=32))
+            lane = txl.lane_id()
+            v = txl.local_scalar("float32")
+            txl.ptx.ld.global_.f32(v, x.ptr_to([lane]))
+            acc = txl.local_scalar("float32", init=v)
+            with ns.token_loop(trip) as i:
+                txl.assign(acc, acc + txl.cast(i, "float32"))
+            for delta in (16, 8, 4, 2, 1):
+                ns.pair_sum(acc, acc, txl.int32(delta))
+            txl.ptx.st.global_.f32(y.ptr_to([lane]), acc)
+
+        return k
+
+    def lowering(self, func):
+        def substitute(body, var, value):
+            return tvm_ffi.structural_map(
+                body, [(ir.Var, lambda v: value if v.same_as(var) else v)]
+            )
+
+        def regions(stmt):
+            # Shape-dependent lowering: a short constant trip count unrolls, anything else loops.
+            if not stmt.op.same_as(self.token_loop):
+                return stmt
+            (i,) = stmt.body_params
+            n = stmt.args[0]
+            if isinstance(n, ir.IntImm) and n.value <= 8:
+                return ir.SeqStmt(
+                    [substitute(stmt.body, i, ir.IntImm("int32", t)) for t in range(n.value)],
+                    loc=stmt.loc,
+                )
+            zero, one = ir.IntImm("int32", 0), ir.IntImm("int32", 1)
+            return ir.For(i, zero, n, one, ir.ForKind.DEFAULT, stmt.body, loc=stmt.loc)
+
+        def is_pair_sum(stmt):
+            return (
+                isinstance(stmt, ir.Evaluate)
+                and isinstance(stmt.value, ir.Call)
+                and stmt.value.op.same_as(self.pair_sum)
+            )
+
+        def fuse(seq):
+            # Fusion: a run of pair_sum on one destination becomes one butterfly with one peer local.
+            out, run = [], []
+
+            def flush():
+                if not run:
+                    return
+                dst = run[0].value.args[0]
+                with extension.emit(loc=run[0].loc) as block:
+                    peer = txl.local_scalar("uint32")
+                    for call in run:
+                        _, val, delta = call.value.args
+                        txl.ptx.shfl_sync.bfly.b32(
+                            peer,
+                            txl.reinterpret(val, ty="uint32"),
+                            txl.cast(delta, "uint32"),
+                            txl.uint32(31),
+                            txl.uint32(0xFFFFFFFF),
+                        )
+                        txl.assign(dst, dst + txl.reinterpret(peer, ty="float32"))
+                out.append(block.stmt)
+                run.clear()
+
+            for stmt in seq.seq:
+                if is_pair_sum(stmt) and (
+                    not run or run[0].value.args[0].same_as(stmt.value.args[0])
+                ):
+                    run.append(stmt)
+                else:
+                    flush()
+                    out.append(stmt)
+            flush()
+            return ir.SeqStmt(out, loc=seq.loc)
+
+        return tvm_ffi.structural_map(func, [(ir.RegionStmt, regions), (ir.SeqStmt, fuse)])
+
+
+def test_pass_level_lowering_unrolls_by_shape_and_fuses_runs():
+    ext = _PassLevel()
+    unrolled = extension.lower(ext.kernel(txl.int32(3)), ext.lowering)
+    script = unrolled.func.script()
+    assert "for " not in script and script.count('T.Cast("float32", ') == 3
+    # one shared peer register for the five shuffle rounds
+    assert script.count('T.uint32, scope="local"') == 1 and script.count("T.ptx.shfl_sync(") == 5
+    looped = extension.lower(ext.kernel(txl.int32(1000)), ext.lowering)
+    assert "for i in range(1000)" in looped.func.script()
+    inputs = {"x": np.ones(32, dtype=np.float32), "y": np.zeros(32, dtype=np.float32)}
+    assert synccheck(unrolled.func, inputs).verdict == "clean"

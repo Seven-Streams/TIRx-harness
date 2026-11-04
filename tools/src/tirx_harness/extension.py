@@ -221,6 +221,15 @@ def _flatten(passes) -> list:
     return flat
 
 
+def _lower_function(func, passes, session, allowed_func_calls):
+    """Run the passes under ``session`` and verify the result."""
+    with _active_session(session):
+        for pass_ in _flatten(passes):
+            func = _apply_pass(pass_, func)
+    verify_lowered(func, allowed_func_calls=allowed_func_calls)
+    return func
+
+
 def lower(kernel, *passes, allowed_func_calls: Iterable[str] = ()):
     """Lower a traced kernel to core TIRx-lite IR and verify the result.
 
@@ -232,18 +241,87 @@ def lower(kernel, *passes, allowed_func_calls: Iterable[str] = ()):
     for a bare function). It must contain no extension construct and must satisfy
     the TIRx-lite low-level IR contract; ``allowed_func_calls`` is forwarded to
     that contract check exactly as ``@txl.kernel`` accepts it.
+
+    :func:`attach` binds the same passes to the kernel object instead, so one
+    object serves the checkers, ``compile()`` and the benchmark.
     """
     func = _function_of(kernel)
     session = getattr(kernel, "session", None)
-    with _active_session(session):
-        for pass_ in _flatten(passes):
-            func = _apply_pass(pass_, func)
-    verify_lowered(func, allowed_func_calls=allowed_func_calls)
+    func = _lower_function(func, passes, session, allowed_func_calls)
     if session is None:
         return func
     from tirx_kernels.tirx_lite.entry import Kernel
 
     return Kernel(func, session)
+
+
+_ATTACHED_CLASS = None
+
+
+def _attached_kernel_class():
+    """The ``txl.Kernel`` subclass behind :func:`attach`, created on first use."""
+    global _ATTACHED_CLASS
+    if _ATTACHED_CLASS is None:
+        from tirx_kernels.tirx_lite.entry import Kernel
+
+        class AttachedKernel(Kernel):
+            """A traced kernel whose lowering passes run on first use.
+
+            ``func``, ``mod``, ``compile()`` and ``source()`` all see the lowered
+            and verified function, so the checkers, the compiler and the
+            benchmark consume one object. ``traced_func`` keeps the kernel as it
+            was written, for reading at the abstraction level.
+            """
+
+            def __init__(self, kernel, passes, allowed_func_calls):
+                # Kernel.__init__ assigns ``func``; here it is the lowered view.
+                self.session = kernel.session
+                self.name = kernel.name
+                self.warps = kernel.warps
+                self.entry_regs = kernel.entry_regs
+                self.traced_func = kernel.func
+                self.passes = tuple(passes)
+                self.allowed_func_calls = tuple(allowed_func_calls)
+                self._lowered = None
+
+            @property
+            def func(self):
+                if self._lowered is None:
+                    self._lowered = _lower_function(
+                        self.traced_func, self.passes, self.session, self.allowed_func_calls
+                    )
+                return self._lowered
+
+            def __repr__(self) -> str:
+                state = "lowered" if self._lowered is not None else "not lowered yet"
+                return (
+                    f"<txl.kernel {self.name} warps={self.warps} passes={len(self.passes)} {state}>"
+                )
+
+        _ATTACHED_CLASS = AttachedKernel
+    return _ATTACHED_CLASS
+
+
+def attach(kernel, *passes, allowed_func_calls: Iterable[str] = ()):
+    """Bind lowering passes to a traced kernel so that lowering runs on first use.
+
+    Returns a ``txl.Kernel`` whose ``func``, ``mod``, ``compile()`` and
+    ``source()`` are the lowered and verified kernel, computed once, on first
+    access, exactly as :func:`lower` would (same passes, same session, same
+    residue and low-level contract checks). The kernel as written stays
+    available as ``traced_func``. Use it where a candidate holds one object per
+    kernel::
+
+        main = extension.attach(main_traced, lower_pass)
+        synccheck(main.func, inputs)          # lowered
+        executable = main.compile()           # lowered
+
+    Attach once per kernel; attaching the result again lowers from the already
+    lowered function.
+    """
+    if not hasattr(kernel, "session") or not hasattr(kernel, "func"):
+        raise TypeError(f"attach expects a txl.Kernel, got {type(kernel).__name__}")
+    return _attached_kernel_class()(kernel, _flatten(passes), tuple(allowed_func_calls))
 
 
 class Emitted:
@@ -504,6 +582,7 @@ __all__ = [
     "Namespace",
     "Pass",
     "Residue",
+    "attach",
     "emit",
     "is_core_name",
     "lower",

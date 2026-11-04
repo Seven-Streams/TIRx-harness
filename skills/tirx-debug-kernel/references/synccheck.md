@@ -51,6 +51,7 @@ topology, and inputs checked.
 | `setmaxnreg` protocol error | Register-pool requests or releases cannot be satisfied legally. |
 | out-of-bounds access | An executed concrete memory access is outside its view or backing allocation. |
 | incomplete | Missing evidence or a resource limit prevented certification. |
+| `extension_residue` (incomplete) | The kernel still carries IR-extension constructs, listed with their source lines. Lower it with `tirx_harness.extension.lower` and check the result; this is not a checker defect. |
 
 `report.print()` identifies the kernel operation responsible for a finding and,
 when relevant, related or witness operations. The output includes source text
