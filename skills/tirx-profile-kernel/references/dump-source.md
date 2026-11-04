@@ -50,9 +50,15 @@ tree — the host module alone doesn't carry the device source).
 
 - **Kernel symbol name** — the device symbol is `<global_symbol>_kernel`, where
   `global_symbol` comes from the **PrimFunc's own attribute**, not the IRModule
-  key. TIRx kernels carry `global_symbol = "_kernel"`, so `IRModule({"main":
-  kernel})` compiles to `_kernel_kernel` (*not* `main_kernel`). `dump_module`
-  returns it in `.symbols`; pass one to `function=` to scope SASS.
+  key. A `@txl.kernel def kda_main(...)` carries `global_symbol = "kda_main"`
+  and compiles to `kda_main_kernel` (*not* `main_kernel`); a function whose
+  attribute is `"_kernel"` compiles to `_kernel_kernel`. `dump_module` returns
+  the real names in `.symbols`; pass one to `function=` to scope SASS, and use
+  it (`-k regex:kda_main_kernel`) to pick the kernel in NCU, where a bare
+  `_kernel` pattern also matches torch's own kernels.
+- **`.ptxas` needs the SASS stage** — the `ptxas -v` report is produced while
+  building the cubin, so `dump_module(ex, sass=False)` returns an empty
+  `.ptxas` dict; keep the default `sass=True` to read registers and spills.
 - **CUDA** shows the generated C++ kernel source — verify codegen, register
   annotations, high-level structure.
 - **PTX** shows the virtual ISA — instruction selection, register allocation, predication.
