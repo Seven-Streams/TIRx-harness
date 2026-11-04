@@ -15,6 +15,8 @@ The package exposes:
 - `tirx_harness.synccheck` and `tirx_harness.racecheck`: native correctness checks
 - `tirx_harness.numsim`: transpilation and deterministic numerical simulation
 - `tirx_harness.dump_kernel`: CUDA, PTX, cubin, and SASS inspection
+- `tirx_harness.extension`: IR extensions for TIRx-lite kernels (own operators,
+  region operators and types), lowered and verified before the tools above run
 
 See the [installation guide](../docs/installation.md) for the full harness setup.
 

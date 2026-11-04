@@ -77,6 +77,8 @@ cd {{worktree}} && \
   not import code from `scratch/` or another frontier member.
 - Shape-aware dispatch inside `setup()` over your OWN kernels is allowed.
 
+{{kernel_ir_extension_contract}}
+
 ## 7. Durable frontier and Git discipline
 
 - `{{workload_dir}}/frontier/index.json` is the compact source of truth across

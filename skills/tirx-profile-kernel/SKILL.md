@@ -14,7 +14,9 @@ case is available.
 
 Use the user's workflow Python environment for imports, adapters, and tool
 execution. Resolve TIRx-lite documentation and examples through `$tirx-wiki` in that
-same environment; do not assume kernels live inside a skill directory.
+same environment; do not assume kernels live inside a skill directory. A kernel
+that uses IR extensions is profiled through the `tirx_harness.extension.lower(...)`
+result: compile and dump that lowered kernel, which is what the benchmark runs.
 
 ## Tool routing
 

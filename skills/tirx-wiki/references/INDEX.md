@@ -7,6 +7,10 @@ context as appropriate.
 
 ## Contents
 
+- [IR extensions](tirx-ir-extension.md): defining operators, region operators
+  and types of your own for TIRx-lite kernels, and lowering them with
+  `tirx_harness.extension` before the checkers, NumSim and the compiler see
+  the kernel. Versioned with this skill.
 - [NVIDIA manuals](manuals/INDEX.md): CUDA programming, PTX ISA, and Nsight
   Compute CLI/profiling references fetched from NVIDIA by the skill fetcher and
   converted to RST for local reading and keyword search.

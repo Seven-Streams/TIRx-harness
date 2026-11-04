@@ -12,6 +12,7 @@ integrating checks, simulation, or generated-code inspection into your own loop.
 | Execute a kernel on the CPU and compare outputs | [Numerical simulation](numsim.md) |
 | Describe inputs, tensor maps, and comparisons | [Simulation inputs](inputs.md) |
 | Extract generated code and compiler resource information | [Generated-code inspection](inspection.md) |
+| Define your own IR operators and types and lower them before checks | [IR extensions](extension.md) |
 
 The reference focuses on callable tools and the objects their callers supply
 or receive.
@@ -23,4 +24,5 @@ checkers
 numsim
 inputs
 inspection
+extension
 ```

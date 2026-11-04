@@ -64,6 +64,8 @@ invokes this same script while excluding resources banned by the task.
 - TIRx-lite authoring guide: `references/repos/tirx-kernels/tirx_kernels/tirx_lite/README.md`
 - Kernel implementations: `references/repos/tirx-kernels/tirx_kernels/`
 - PTX ISA manual: `references/manuals/ptx_isa.rst`
+- IR extensions (own operators, region operators and types, and their
+  lowering before checks and compilation): `references/tirx-ir-extension.md`
 
 ## Additional references
 

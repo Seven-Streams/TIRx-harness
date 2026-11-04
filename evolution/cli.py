@@ -32,6 +32,7 @@ from evolution.preparation.declare import (
 from evolution.preparation.live_references import kernel_reference_bans
 from evolution.prompts.render import (
     kernel_authoring_contract,
+    kernel_ir_extension_contract,
     kernel_remote_gpu_work,
     kernel_remote_local_checks,
     kernel_research_debugging_contract,
@@ -51,6 +52,22 @@ TOOLSET_NAME = "kda_flow"
 FLOWVERSE_CONFIG_NAME = "flowverse.yaml"
 
 
+def _interpreter_argument(python: Path | None, worktree: Path) -> str:
+    """The interpreter as the bench command spells it, run from the worktree.
+
+    The run venv's interpreter is a symlink to the launcher's Python, which
+    resolves outside the run directory. The banned-path hook then matches the
+    absolute token against the source-checkout ban and blocks the command copied
+    from the prompt. A worktree-relative path names the same interpreter and
+    stays inside the allowed root.
+    """
+    interpreter = Path(python or sys.executable)
+    try:
+        return str(interpreter.relative_to(worktree))
+    except ValueError:
+        return str(interpreter)
+
+
 def _prompt(
     *,
     task,
@@ -63,7 +80,7 @@ def _prompt(
     preamble = "You are running as an autonomous kernel-optimization agent."
     environment_blocks = ["1. " + blocks["banned_reads"]]
     bench_timeout_s = task.bench_timeout_s or 120
-    interpreter = shlex.quote(str(python or sys.executable))
+    interpreter = shlex.quote(_interpreter_argument(python, worktree))
     bench_command = (
         f"timeout {bench_timeout_s}s {interpreter} "
         f"evolution/benchmark/adapter.py {task.workload_dir} CANDIDATE"
@@ -93,6 +110,7 @@ def _prompt(
         workload_dir=task.workload_dir,
         worktree=str(worktree),
         kernel_authoring_contract=kernel_authoring_contract(task),
+        kernel_ir_extension_contract=kernel_ir_extension_contract(task),
         kernel_search_references=kernel_search_references(task),
         kernel_research_debugging_contract=kernel_research_debugging_contract(task),
         bench_command=bench_command,
@@ -138,6 +156,10 @@ def setup(
     bench = worktree / BENCH_ADAPTER
     if not bench.exists():
         raise SystemExit(f"worktree has no benchmark entry: {bench}")
+    # The clean-room commit tracks no empty directories; give the agent the
+    # workload layout the prompt refers to instead of leaving it to guess.
+    for leaf in ("scratch", "frontier"):
+        (worktree / task.workload_dir / leaf).mkdir(parents=True, exist_ok=True)
 
     prompt_path = run_dir / "PROMPT.md"
     prompt_path.write_text(

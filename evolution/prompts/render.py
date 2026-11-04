@@ -37,6 +37,15 @@ def kernel_authoring_contract(task: Task) -> str:
     raise ValueError(f"unsupported kernel authoring mode: {task.kernel_authoring!r}")
 
 
+def kernel_ir_extension_contract(task: Task) -> str:
+    """The IR-extension workflow: own abstractions, lowered before checks and scoring."""
+    if task.kernel_authoring == "TIRx-lite":
+        return render("rule_ir_extension").rstrip("\n")
+    if task.kernel_authoring == "task":
+        return ""
+    raise ValueError(f"unsupported kernel authoring mode: {task.kernel_authoring!r}")
+
+
 def kernel_search_references(task: Task) -> str:
     if task.kernel_authoring == "TIRx-lite":
         return """\

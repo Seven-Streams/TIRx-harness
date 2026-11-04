@@ -49,7 +49,10 @@ semantics. Do not load unrelated guides.
 
 1. Resolve the target kernel and a representative input. Treat user-provided
    launch details as authoritative; otherwise inspect nearby code, tests, and
-   benchmarks for the existing construction or launch path.
+   benchmarks for the existing construction or launch path. A kernel that uses
+   IR extensions is checked after its own lowering: pass the `.func` of the
+   `tirx_harness.extension.lower(...)` result, never the unlowered kernel
+   (the checkers report it as `incomplete`).
 2. Create only the minimal task-local adapter needed to call the real kernel.
    Do not modify production code merely to make a checker runnable.
 3. Follow the default pre-GPU-to-device order before choosing a speculative
