@@ -9,9 +9,12 @@ invocation. Their guarantees and limitations are described in
 
 Pass a specialized TIRx function as `kernel`; for a TIRx-lite kernel, use
 `kernel.func`. Bind all runtime parameters by name in `inputs`, including
-output buffers. Buffer bindings are CPU NumPy arrays; scalar parameters take
-concrete scalar values. Only parameterless kernels may omit the bindings.
-Tensor-map parameters use {py:meth}`tirx_harness.numsim.TensorMap.numpy`.
+output buffers. Buffer bindings are CPU NumPy arrays (bf16 buffers as
+`ml_dtypes.bfloat16`); scalar parameters take concrete scalar values. Only
+parameterless kernels may omit the bindings. Tensor-map parameters use
+{py:meth}`tirx_harness.numsim.TensorMap.numpy`. A kernel that uses
+[IR extensions](extension.md) is checked after its lowering, through the
+`.func` of the `lower` result.
 
 ```{eval-rst}
 .. autoapifunction:: tirx_harness.synccheck

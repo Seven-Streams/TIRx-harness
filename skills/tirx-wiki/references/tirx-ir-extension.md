@@ -161,6 +161,16 @@ Lower them with the extension's pass (tirx_harness.extension.lower) before syncc
   goes through `txl.local_scalar(dtype, init=...)`, which needs a `PrimType`
   result. Extension-typed values therefore live between instructions only;
   lower them away (`first(pair(a, b)) -> a`).
+- **Effect kinds.** A void operator is a statement; keep the default
+  `UpdateState` whether it writes memory or a local (`ReadState` on a void op
+  is harmless but means nothing extra). For a *valued* operator the kind says
+  what the compiler may do with the expression: `Pure` may be re-emitted,
+  merged or dropped when unused; `ReadState` reads memory or mutable state and
+  must not move across stores (a load-like op); `UpdateState` has side effects.
+- **Checker inputs for bf16.** NumPy has no bf16; bind bf16 buffers as
+  `ml_dtypes.bfloat16` arrays (from a torch tensor:
+  `t.cpu().view(torch.int16).numpy().view(ml_dtypes.bfloat16)`), which
+  `synccheck`/`racecheck` accept directly.
 - **Explicit types bypass inference.** `ir.Call(op, args, ty=...)` is not
   validated against `infer_type`; the Python route has no custom validator.
   Check operands inside `infer_type` (raise `TypeError`) so mistakes fail at

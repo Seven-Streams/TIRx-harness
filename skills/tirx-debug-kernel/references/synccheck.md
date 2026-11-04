@@ -27,6 +27,12 @@ binding dictionary for one invocation. A parameterless kernel may omit
 `inputs`; otherwise provide every runtime argument needed by the executed
 control flow.
 
+Buffer bindings are CPU NumPy arrays of the parameter's dtype; for bf16 use
+`ml_dtypes.bfloat16` (from a torch tensor:
+`t.cpu().view(torch.int16).numpy().view(ml_dtypes.bfloat16)`). A kernel that
+uses IR extensions is checked through the `tirx_harness.extension.lower(...)`
+result's `.func`.
+
 Missing bindings and unsupported executed operations produce `incomplete`.
 Synccheck never treats an execution it could not certify as clean.
 
