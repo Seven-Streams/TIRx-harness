@@ -193,7 +193,10 @@ Lower them with the extension's pass (tirx_harness.extension.lower) before syncc
   first). Replace a `RegionStmt` with a statement that binds its
   `body_params` (an `ir.For` over the trip variable, or `ir.Bind`s followed by
   the body in a `SeqStmt`).
-- **Debugging a pass.** Print `func.script()` before and after; use
-  `extension.residue(func)` to see what remains; `ir.Op.list_op_names()`
+- **Debugging a pass.** An error inside an `emit` block is re-raised as
+  `ExtensionLoweringError` whose message names the original error and the
+  kernel line being lowered, and `lower` notes which pass failed at the end
+  of the (long) `structural_map` traceback. Print `func.script()` before and
+  after; use `extension.residue(func)` to see what remains; `ir.Op.list_op_names()`
   lists every registered operator, and `ir.Op.get("tirx.ptx.st")` shows how a
   core instruction is spelled when `emit` is not convenient.

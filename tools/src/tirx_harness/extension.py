@@ -64,6 +64,16 @@ class Residue(NamedTuple):
         return f"{self.kind} {self.name}{where}"
 
 
+@tvm_ffi.register_error
+class ExtensionLoweringError(RuntimeError):
+    """An error raised inside an :func:`emit` block, naming the construct being lowered.
+
+    Registered with tvm_ffi so it survives the callback boundary of
+    ``structural_map``, where other exception classes are reconstructed and lose
+    their notes. The message carries the original exception's type and text.
+    """
+
+
 class ExtensionResidueError(ValueError):
     """Raised when extension constructs remain after lowering."""
 
@@ -171,7 +181,15 @@ def _apply_pass(pass_, func: tirx.Function) -> tirx.Function:
         return module["main"]
     if not callable(pass_):
         raise TypeError(f"a lowering pass must be callable, got {type(pass_).__name__}")
-    result = pass_(func)
+    try:
+        result = pass_(func)
+    except Exception as error:
+        # The native structural_map traceback is long; name the failing pass at the end of it.
+        error.add_note(
+            f"[tirx_harness.extension] raised inside lowering pass "
+            f"{getattr(pass_, '__name__', pass_)!r}"
+        )
+        raise
     if not isinstance(result, tirx.Function):
         raise TypeError(
             f"lowering pass {getattr(pass_, '__name__', pass_)!r} must return the rewritten "
@@ -271,7 +289,17 @@ def emit(kernel=None, *, loc: ir.Location | None = None):
             )
             with builder.function_(), located:
                 builder.func_name_("_tirx_harness_extension_emit")
-                yield block
+                try:
+                    yield block
+                except ExtensionLoweringError:
+                    raise
+                except Exception as error:
+                    where = _source_loc(loc)
+                    subject = f"the construct at {where}" if where else "a construct"
+                    raise ExtensionLoweringError(
+                        f"{type(error).__name__}: {error}\n"
+                        f"  raised while emitting the lowering of {subject}"
+                    ) from error
         block.stmt = ib.get().body
 
 
@@ -471,6 +499,7 @@ __all__ = [
     "CORE_PREFIXES",
     "VOID",
     "Emitted",
+    "ExtensionLoweringError",
     "ExtensionResidueError",
     "Namespace",
     "Pass",

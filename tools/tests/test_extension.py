@@ -236,6 +236,30 @@ def test_emit_uses_the_active_kernel_session():
             txl.lane_id()
 
 
+def test_errors_inside_a_pass_name_the_pass_and_the_lowered_line():
+    ext = _Complex()
+    k = ext.kernel()
+
+    def misspelled(func):
+        def stmts(stmt):
+            if isinstance(stmt, ir.Evaluate) and isinstance(stmt.value, ir.Call):
+                if stmt.value.op.same_as(ext.st_scaled):
+                    with extension.emit(loc=stmt.loc) as block:
+                        txl.ptx["no.such.instruction"](stmt.value.args[0])
+                    return block.stmt
+            return stmt
+
+        return tvm_ffi.structural_map(func, [(ir.Stmt, stmts)])
+
+    with pytest.raises(extension.ExtensionLoweringError) as info:
+        extension.lower(k, misspelled)
+    # The construct's kernel line travels in the message, across the structural_map
+    # callback boundary; the pass name is attached once the error is back in Python.
+    assert "KeyError" in str(info.value)
+    assert f"the construct at {__file__}:" in str(info.value)
+    assert "lowering pass 'misspelled'" in "\n".join(getattr(info.value, "__notes__", []))
+
+
 def test_redefinition_replaces_the_definition_with_a_warning():
     ns = _fresh_namespace()
     ns.op("f", "First definition.", ["a"], infer_type=lambda c: c.args[0].ty)
